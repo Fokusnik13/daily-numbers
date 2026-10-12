@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Daily Numbers</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+<script src="game.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1d1d1f);
+    --hint: var(--tg-theme-hint-color, #8a8a8e);
+    --btn: var(--tg-theme-button-color, #2f7cf6);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --card: var(--tg-theme-secondary-bg-color, #f1f2f5);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); user-select: none; }
+  .wrap { max-width: 420px; margin: 0 auto; padding: 16px; }
+  header { display: flex; justify-content: space-between; align-items: center; }
+  h1 { font-size: 20px; margin: 0; }
+  .meta { color: var(--hint); font-size: 13px; }
+  .levels { display: flex; gap: 6px; margin: 14px 0; }
+  .lv { flex: 1; text-align: center; padding: 6px 0; border-radius: 10px; background: var(--card);
+        font-size: 13px; cursor: pointer; }
+  .lv.active { outline: 2px solid var(--btn); }
+  .target { text-align: center; margin: 10px 0 18px; }
+  .target .n { font-size: 56px; font-weight: 700; line-height: 1; }
+  .target .l { color: var(--hint); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .num { height: 72px; border-radius: 36px; background: var(--card); font-size: 26px; font-weight: 600;
+         display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .08s; }
+  .num:active { transform: scale(.95); }
+  .num.sel { background: var(--btn); color: var(--btn-text); }
+  .num.used { visibility: hidden; }
+  .num.hit { background: #2fb36d; color: #fff; }
+  .ops { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
+  .op { height: 56px; border-radius: 14px; border: 2px solid var(--card); background: transparent; color: var(--text);
+        font-size: 26px; cursor: pointer; }
+  .op.sel { border-color: var(--btn); color: var(--btn); }
+  .row { display: flex; gap: 10px; }
+  .row button { flex: 1; height: 46px; border-radius: 12px; border: none; font-size: 15px; cursor: pointer;
+                background: var(--card); color: var(--text); }
+  .row button.main { background: var(--btn); color: var(--btn-text); font-weight: 600; }
+  .log { min-height: 22px; margin-top: 12px; text-align: center; color: var(--hint); font-size: 14px; }
+  .done { text-align: center; padding: 24px 0; }
+  .done .stars { font-size: 34px; margin: 10px 0; letter-spacing: 2px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>Daily Numbers</h1><div class="meta" id="day"></div></div>
+    <div class="meta" id="streak"></div>
+  </header>
+
+  <div class="levels" id="levels"></div>
+
+  <div id="play">
+    <div class="target"><div class="l">Make this number</div><div class="n" id="target"></div></div>
+    <div class="grid" id="grid"></div>
+    <div class="ops" id="ops"></div>
+    <div class="row">
+      <button id="undo">↶ Undo</button>
+      <button id="hint">💡 Hint</button>
+      <button id="submit" class="main">Submit</button>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div id="done" class="done hidden">
+    <div>Today's result</div>
+    <div class="stars" id="total"></div>
+    <div class="meta" id="nextIn"></div>
+    <div class="row" style="margin-top:18px">
+      <button id="share" class="main">Share with friends</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ---- settings: fill in after creating the bot and the AdsGram block ----
+const APP_LINK = 'https://t.me/BOT_USERNAME/APP_NAME';
+const ADSGRAM_BLOCK_ID = '';   // empty = hints are free (testing mode)
+// -------------------------------------------------------------------------
+
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const today = new Date();
+const dateKey = today.toISOString().slice(0, 10);   // UTC day, same puzzle for everybody
+const puzzles = Game.dailyPuzzles(dateKey);
+const OPS = ['+', '-', '×', '÷'];
+
+// Storage: Telegram CloudStorage when available (syncs across devices), else localStorage.
+const store = {
+  get(key) {
+    return new Promise((res) => {
+      if (tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9')) {
+        tg.CloudStorage.getItem(key, (err, v) => res(err ? localStorage.getItem(key) : v || localStorage.getItem(key)));
+      } else res(localStorage.getItem(key));
+    });
+  },
+  set(key, value) {
+    localStorage.setItem(key, value);
+    if (tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9')) tg.CloudStorage.setItem(key, value);
+  },
+};
+
+let state;          // per-day progress: { results: [stars|null x5], hints: n }
+let level = 0;
+let nums, history, selNum, selOp, hintStep;
+
+const $ = (id) => document.getElementById(id);
+
+function haptic(type) {
+  if (tg && tg.HapticFeedback) {
+    if (type === 'ok') tg.HapticFeedback.notificationOccurred('success');
+    else tg.HapticFeedback.impactOccurred('light');
+  }
+}
+
+function starsText(n) { return n === null ? '·' : '★'.repeat(n) + '☆'.repeat(3 - n); }
+
+function renderLevels() {
+  $('levels').innerHTML = '';
+  puzzles.forEach((p, i) => {
+    const d = document.createElement('div');
+    d.className = 'lv' + (i === level ? ' active' : '');
+    d.textContent = state.results[i] === null ? String(i + 1) : starsText(state.results[i]);
+    d.onclick = () => { if (state.results[i] === null) startLevel(i); };
+    $('levels').appendChild(d);
+  });
+}
+
+function startLevel(i) {
+  level = i;
+  const p = puzzles[i];
+  nums = p.numbers.slice().sort((a, b) => a - b).map((v) => ({ v, used: false }));
+  history = []; selNum = null; selOp = null; hintStep = 0;
+  $('target').textContent = p.target;
+  $('log').textContent = '';
+  renderLevels(); render();
+}
+
+function render() {
+  const target = puzzles[level].target;
+  $('grid').innerHTML = '';
+  nums.forEach((n, i) => {
+    const d = document.createElement('div');
+    d.className = 'num' + (n.used ? ' used' : '') + (i === selNum ? ' sel' : '') + (n.v === target && !n.used ? ' hit' : '');
+    d.textContent = n.v;
+    d.onclick = () => tapNum(i);
+    $('grid').appendChild(d);
+  });
+  $('ops').innerHTML = '';
+  OPS.forEach((o) => {
+    const b = document.createElement('button');
+    b.className = 'op' + (o === selOp ? ' sel' : '');
+    b.textContent = o;
+    b.onclick = () => { if (selNum !== null) { selOp = selOp === o ? null : o; haptic(); render(); } };
+    $('ops').appendChild(b);
+  });
+}
+
+function tapNum(i) {
+  if (nums[i].used) return;
+  haptic();
+  if (selNum === null || selOp === null) { selNum = selNum === i ? null : i; render(); return; }
+  if (i === selNum) { selNum = null; selOp = null; render(); return; }
+  const a = nums[selNum].v, b = nums[i].v;
+  const r = Game.apply(a, selOp, b);
+  if (r === null) { $('log').textContent = selOp === '÷' ? 'Only whole numbers' : 'Only positive numbers'; selOp = null; render(); return; }
+  history.push(nums.map((n) => ({ ...n })));
+  $('log').textContent = `${a} ${selOp} ${b} = ${r}`;
+  nums[selNum].used = true;
+  nums[i].v = r;
+  selNum = i; selOp = null;
+  render();
+  if (r === puzzles[level].target) finishLevel(3);
+}
+
+function bestValue() {
+  const t = puzzles[level].target;
+  return nums.filter((n) => !n.used).map((n) => n.v)
+    .reduce((best, v) => (Math.abs(t - v) < Math.abs(t - best) ? v : best), Infinity);
+}
+
+function finishLevel(stars) {
+  if (state.results[level] !== null) return;
+  state.results[level] = stars;
+  save();
+  haptic('ok');
+  $('log').textContent = stars === 3 ? 'Exact! ★★★' : `Closest: ${bestValue()} — ${starsText(stars)}`;
+  setTimeout(() => {
+    const next = state.results.findIndex((r) => r === null);
+    if (next === -1) showDone(); else startLevel(next);
+  }, 900);
+}
+
+function showHint() {
+  const step = puzzles[level].solution[hintStep];
+  if (!step) { $('log').textContent = 'No more hints for this level'; return; }
+  $('log').textContent = `Hint: ${step[0]} ${step[1]} ${step[2]} = ${step[3]}`;
+  hintStep++; state.hints++; save();
+}
+
+function askHint() {
+  if (!ADSGRAM_BLOCK_ID || !window.Adsgram) { showHint(); return; }
+  window.Adsgram.init({ blockId: ADSGRAM_BLOCK_ID }).show()
+    .then((result) => { if (result && result.done) showHint(); })
+    .catch(() => { $('log').textContent = 'Ad not available — try again later'; });
+}
+
+function showDone() {
+  $('play').classList.add('hidden');
+  $('done').classList.remove('hidden');
+  const total = state.results.reduce((s, r) => s + (r || 0), 0);
+  $('total').textContent = state.results.map(starsText).join(' ');
+  $('nextIn').textContent = `${total}/15 stars · new puzzles in ${hoursLeft()} h`;
+  updateStreak();
+}
+
+function hoursLeft() {
+  const now = new Date();
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.ceil((next - now) / 3600000);
+}
+
+async function updateStreak() {
+  const raw = await store.get('streak');
+  let s = raw ? JSON.parse(raw) : { last: '', count: 0 };
+  if (s.last !== dateKey) {
+    const y = new Date(Date.parse(dateKey) - 86400000).toISOString().slice(0, 10);
+    s = { last: dateKey, count: s.last === y ? s.count + 1 : 1 };
+    store.set('streak', JSON.stringify(s));
+  }
+  $('streak').textContent = `🔥 ${s.count}`;
+}
+
+function shareText() {
+  const total = state.results.reduce((s, r) => s + (r || 0), 0);
+  return `Daily Numbers #${Game.dayNumber(dateKey)} — ${total}/15 ★\n` +
+    state.results.map((r) => (r === 3 ? '🟩' : r ? '🟨' : '⬜')).join('') + '\nCan you beat me?';
+}
+
+function share() {
+  const url = `https://t.me/share/url?url=${encodeURIComponent(APP_LINK)}&text=${encodeURIComponent(shareText())}`;
+  if (tg) tg.openTelegramLink(url); else window.open(url, '_blank');
+}
+
+function save() { store.set('day:' + dateKey, JSON.stringify(state)); }
+
+$('undo').onclick = () => { if (history.length) { nums = history.pop(); selNum = null; selOp = null; $('log').textContent = ''; render(); } };
+$('hint').onclick = askHint;
+$('submit').onclick = () => finishLevel(Game.starsFor(puzzles[level].target, bestValue()));
+$('share').onclick = share;
+
+(async function init() {
+  $('day').textContent = `#${Game.dayNumber(dateKey)} · ${dateKey}`;
+  const saved = await store.get('day:' + dateKey);
+  state = saved ? JSON.parse(saved) : { results: [null, null, null, null, null], hints: 0 };
+  const raw = await store.get('streak');
+  if (raw) $('streak').textContent = `🔥 ${JSON.parse(raw).count}`;
+  const next = state.results.findIndex((r) => r === null);
+  if (next === -1) { renderLevels(); showDone(); } else startLevel(next);
+})();
+</script>
+</body>
+</html>
