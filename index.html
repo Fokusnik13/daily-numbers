@@ -6,7 +6,7 @@
 <title>Daily Numbers</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
-<script src="game.js"></script>
+<script src="game.js?v=3"></script>
 <style>
   :root {
     --bg: var(--tg-theme-bg-color, #ffffff);
@@ -86,9 +86,13 @@
 'use strict';
 // ---- settings: fill in after creating the bot and the AdsGram block ----
 const APP_LINK = 'https://t.me/DailyNumbersGameBot/play';
-const ADSGRAM_BLOCK_ID = '';   // empty = hints are free (testing mode)
+const ADSGRAM_BLOCK_ID = '53601';   // empty = hints are free (testing mode)
 // -------------------------------------------------------------------------
 
+const VERSION = 'v4';
+// Show any script error on screen, so a broken client is easy to diagnose from a screenshot.
+window.onerror = (msg, src, line) => { const l = document.getElementById('log'); if (l) l.textContent = `Error: ${msg} (line ${line})`; };
+window.onunhandledrejection = (e) => { const l = document.getElementById('log'); if (l) l.textContent = `Error: ${e.reason}`; };
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
@@ -270,7 +274,7 @@ $('submit').onclick = () => finishLevel(Game.starsFor(puzzles[level].target, bes
 $('share').onclick = share;
 
 (async function init() {
-  $('day').textContent = `#${Game.dayNumber(dateKey)} · ${dateKey}`;
+  $('day').textContent = `#${Game.dayNumber(dateKey)} · ${dateKey} · ${VERSION}`;
   const saved = await store.get('day:' + dateKey);
   state = saved ? JSON.parse(saved) : { results: [null, null, null, null, null], hints: 0 };
   const raw = await store.get('streak');
