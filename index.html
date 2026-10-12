@@ -85,7 +85,7 @@
 <script>
 'use strict';
 // ---- settings: fill in after creating the bot and the AdsGram block ----
-const APP_LINK = 'https://t.me/BOT_USERNAME/APP_NAME';
+const APP_LINK = 'https://t.me/DailyNumbersGameBot/play';
 const ADSGRAM_BLOCK_ID = '';   // empty = hints are free (testing mode)
 // -------------------------------------------------------------------------
 
@@ -101,14 +101,22 @@ const OPS = ['+', '-', '×', '÷'];
 const store = {
   get(key) {
     return new Promise((res) => {
-      if (tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9')) {
-        tg.CloudStorage.getItem(key, (err, v) => res(err ? localStorage.getItem(key) : v || localStorage.getItem(key)));
-      } else res(localStorage.getItem(key));
+      const local = () => localStorage.getItem(key);
+      if (!(tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9'))) { res(local()); return; }
+      // Some Telegram clients never call back: fall back to local storage after 500 ms.
+      let finished = false;
+      const finish = (v) => { if (!finished) { finished = true; res(v); } };
+      setTimeout(() => finish(local()), 500);
+      try {
+        tg.CloudStorage.getItem(key, (err, v) => finish(err ? local() : v || local()));
+      } catch (e) { finish(local()); }
     });
   },
   set(key, value) {
     localStorage.setItem(key, value);
-    if (tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9')) tg.CloudStorage.setItem(key, value);
+    if (tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9')) {
+      try { tg.CloudStorage.setItem(key, value); } catch (e) { /* local copy is enough */ }
+    }
   },
 };
 
