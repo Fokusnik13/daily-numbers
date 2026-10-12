@@ -48,6 +48,12 @@
   .log { min-height: 22px; margin-top: 12px; text-align: center; color: var(--hint); font-size: 14px; }
   .done { text-align: center; padding: 24px 0; }
   .done .stars { font-size: 34px; margin: 10px 0; letter-spacing: 2px; }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+  .sheet { background: var(--bg); color: var(--text); border-radius: 18px; padding: 20px; max-width: 380px; font-size: 15px; line-height: 1.45; }
+  .sheet h2 { margin: 0 0 10px; font-size: 19px; }
+  .sheet ol { padding-left: 20px; margin: 8px 0 14px; }
+  .sheet button { width: 100%; height: 46px; border: none; border-radius: 12px; background: var(--btn); color: var(--btn-text); font-size: 16px; font-weight: 600; }
+  .help { border: none; background: var(--card); color: var(--text); width: 34px; height: 34px; border-radius: 17px; font-size: 17px; margin-left: 8px; cursor: pointer; }
   .hidden { display: none; }
 </style>
 </head>
@@ -55,7 +61,7 @@
 <div class="wrap">
   <header>
     <div><h1>Daily Numbers</h1><div class="meta" id="day"></div></div>
-    <div class="meta" id="streak"></div>
+    <div style="display:flex;align-items:center"><span class="meta" id="streak"></span><button class="help" id="help">?</button></div>
   </header>
 
   <div class="levels" id="levels"></div>
@@ -82,6 +88,22 @@
   </div>
 </div>
 
+<div id="rules" class="overlay hidden">
+  <div class="sheet">
+    <h2>How to play</h2>
+    Reach the big target number using the six numbers below.
+    <ol>
+      <li>Tap a number, then <b>+ − × ÷</b>, then another number.</li>
+      <li>They merge into the result. Keep combining.</li>
+      <li>Each number can be used once. You don't have to use them all.</li>
+    </ol>
+    Exact hit = ★★★. Can't get it? <b>Submit</b> your closest number: within 10 = ★★, within 25 = ★.<br>
+    <b>Undo</b> takes a step back, <b>Hint</b> shows a step of the solution.<br><br>
+    5 new puzzles every day — keep your 🔥 streak!
+    <div style="margin-top:16px"><button id="rulesOk">Let's play</button></div>
+  </div>
+</div>
+
 <script>
 'use strict';
 // ---- settings: fill in after creating the bot and the AdsGram block ----
@@ -89,7 +111,7 @@ const APP_LINK = 'https://t.me/DailyNumbersGameBot/play';
 const ADSGRAM_BLOCK_ID = '53601';   // empty = hints are free (testing mode)
 // -------------------------------------------------------------------------
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 // Show any script error on screen, so a broken client is easy to diagnose from a screenshot.
 window.onerror = (msg, src, line) => { const l = document.getElementById('log'); if (l) l.textContent = `Error: ${msg} (line ${line})`; };
 window.onunhandledrejection = (e) => { const l = document.getElementById('log'); if (l) l.textContent = `Error: ${e.reason}`; };
@@ -226,7 +248,7 @@ function askHint() {
   if (!ADSGRAM_BLOCK_ID || !window.Adsgram) { showHint(); return; }
   window.Adsgram.init({ blockId: ADSGRAM_BLOCK_ID }).show()
     .then((result) => { if (result && result.done) showHint(); })
-    .catch(() => { $('log').textContent = 'Ad not available — try again later'; });
+    .catch(() => showHint());   // no ad available: don't block the player, give the hint anyway
 }
 
 function showDone() {
@@ -272,6 +294,8 @@ $('undo').onclick = () => { if (history.length) { nums = history.pop(); selNum =
 $('hint').onclick = askHint;
 $('submit').onclick = () => finishLevel(Game.starsFor(puzzles[level].target, bestValue()));
 $('share').onclick = share;
+$('help').onclick = () => $('rules').classList.remove('hidden');
+$('rulesOk').onclick = () => { $('rules').classList.add('hidden'); store.set('seenRules', '1'); };
 
 (async function init() {
   $('day').textContent = `#${Game.dayNumber(dateKey)} · ${dateKey} · ${VERSION}`;
@@ -281,6 +305,7 @@ $('share').onclick = share;
   if (raw) $('streak').textContent = `🔥 ${JSON.parse(raw).count}`;
   const next = state.results.findIndex((r) => r === null);
   if (next === -1) { renderLevels(); showDone(); } else startLevel(next);
+  if (!(await store.get('seenRules'))) $('rules').classList.remove('hidden');
 })();
 </script>
 </body>
