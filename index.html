@@ -85,6 +85,9 @@
     <div class="row" style="margin-top:18px">
       <button id="share" class="main">Share with friends</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <button id="more">▶ Play more (practice)</button>
+    </div>
   </div>
 </div>
 
@@ -111,7 +114,7 @@
     </ol>
     Exact hit = ★★★. Can't get it? <b>Submit</b> your closest number: within 10 = ★★, within 25 = ★.<br>
     <b>Undo</b> takes a step back, <b>Hint</b> shows a step of the solution after a short ad (optional).<br><br>
-    5 new puzzles every day — keep your 🔥 streak!
+    5 new puzzles every day — keep your 🔥 streak! Then play endless practice.
     <div style="margin-top:16px"><button id="rulesOk">Let's play</button></div>
   </div>
 </div>
@@ -123,7 +126,7 @@ const APP_LINK = 'https://t.me/DailyNumbersGameBot/play';
 const ADSGRAM_BLOCK_ID = '53601';   // empty = hints are free (testing mode)
 // -------------------------------------------------------------------------
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 // Show any script error on screen, so a broken client is easy to diagnose from a screenshot.
 window.onerror = (msg, src, line) => { const l = document.getElementById('log'); if (l) l.textContent = `Error: ${msg} (line ${line})`; };
 window.onunhandledrejection = (e) => { const l = document.getElementById('log'); if (l) l.textContent = `Error: ${e.reason}`; };
@@ -184,6 +187,26 @@ function renderLevels() {
   });
 }
 
+// Practice mode: endless random puzzles after the daily set, difficulty grows slowly.
+let practice = null;   // { n, stars, finished, puzzle }
+function cur() { return practice ? practice.puzzle : puzzles[level]; }
+
+function startPractice() {
+  if (!practice) practice = { n: 0, stars: 0 };
+  practice.n++;
+  practice.finished = false;
+  const difficulty = Math.min(4, 1 + Math.floor(practice.n / 4));
+  practice.puzzle = Game.generate('practice-' + Date.now() + '-' + Math.random(), difficulty);
+  nums = practice.puzzle.numbers.slice().sort((a, b) => a - b).map((v) => ({ v, used: false }));
+  history = []; selNum = null; selOp = null; hintStep = 0;
+  $('done').classList.add('hidden');
+  $('play').classList.remove('hidden');
+  $('levels').innerHTML = `<div class="lv active">Practice #${practice.n} · ${practice.stars} ★</div>`;
+  $('target').textContent = practice.puzzle.target;
+  $('log').textContent = '';
+  render();
+}
+
 function startLevel(i) {
   level = i;
   const p = puzzles[i];
@@ -195,7 +218,7 @@ function startLevel(i) {
 }
 
 function render() {
-  const target = puzzles[level].target;
+  const target = cur().target;
   $('grid').innerHTML = '';
   nums.forEach((n, i) => {
     const d = document.createElement('div');
@@ -228,16 +251,25 @@ function tapNum(i) {
   nums[i].v = r;
   selNum = i; selOp = null;
   render();
-  if (r === puzzles[level].target) finishLevel(3);
+  if (r === cur().target) finishLevel(3);
 }
 
 function bestValue() {
-  const t = puzzles[level].target;
+  const t = cur().target;
   return nums.filter((n) => !n.used).map((n) => n.v)
     .reduce((best, v) => (Math.abs(t - v) < Math.abs(t - best) ? v : best), Infinity);
 }
 
 function finishLevel(stars) {
+  if (practice) {
+    if (practice.finished) return;
+    practice.finished = true;
+    practice.stars += stars;
+    haptic('ok');
+    $('log').textContent = stars === 3 ? 'Exact! ★★★' : `Closest: ${bestValue()} — ${starsText(stars)}`;
+    setTimeout(startPractice, 900);
+    return;
+  }
   if (state.results[level] !== null) return;
   state.results[level] = stars;
   save();
@@ -250,7 +282,7 @@ function finishLevel(stars) {
 }
 
 function showHint() {
-  const step = puzzles[level].solution[hintStep];
+  const step = cur().solution[hintStep];
   if (!step) { $('log').textContent = 'No more hints for this level'; return; }
   $('log').textContent = `Hint: ${step[0]} ${step[1]} ${step[2]} = ${step[3]}`;
   hintStep++; state.hints++; save();
@@ -309,8 +341,9 @@ $('hint').onclick = () => {
 };
 $('adNo').onclick = () => $('adAsk').classList.add('hidden');
 $('adYes').onclick = () => { $('adAsk').classList.add('hidden'); askHint(); };
-$('submit').onclick = () => finishLevel(Game.starsFor(puzzles[level].target, bestValue()));
+$('submit').onclick = () => finishLevel(Game.starsFor(cur().target, bestValue()));
 $('share').onclick = share;
+$('more').onclick = startPractice;
 $('help').onclick = () => $('rules').classList.remove('hidden');
 $('rulesOk').onclick = () => { $('rules').classList.add('hidden'); store.set('seenRules', '1'); };
 
